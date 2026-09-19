@@ -1,107 +1,76 @@
-import { CrearTicketDTO, ConsumirTicketDTO, Ticket, TicketConsumidoResponse, Estadisticas } from '../entities/Ticket';
+import { Ticket } from '../../domain/entities/Ticket';
 import { TicketUseCase } from '../../ports/input/TicketUseCase';
 import { TicketRepository } from '../../ports/output/TicketRepository';
-import { QrCodePort } from '../../ports/output/QrCodePort';
+import { EventRepository } from '../../ports/output/EventRepository';
+import { TicketTypeRepository } from '../../ports/output/TicketTypeRepository';
+import { CompanyRepository } from '../../ports/output/CompanyRepository';
+import { TicketPdfData } from '../../ports/output/PdfPort';
 import { CustomError } from '../../shared/errors/CustomError';
 
 export class TicketService implements TicketUseCase {
   constructor(
     private readonly ticketRepository: TicketRepository,
-    private readonly qrService: QrCodePort
+    private readonly eventRepository: EventRepository,
+    private readonly ticketTypeRepository: TicketTypeRepository,
+    private readonly companyRepository: CompanyRepository
   ) {}
 
-  async crearTicket(data: CrearTicketDTO): Promise<Ticket> {
-    const existente = await this.ticketRepository.obtenerPorDni(data.dni);
-    if (existente) {
-      throw new CustomError('El DNI ya se encuentra registrado', 400);
-    }
-
-    const ticket: Ticket = {
-      nombre: data.nombre,
-      apellido: data.apellido,
-      dni: data.dni,
-      facultad: data.facultad,
-      fechaRegistro: new Date(),
-      consumido: false,
-    };
-
-    const ticketGuardado = await this.ticketRepository.crear(ticket);
-
-    const qrData = JSON.stringify({
-      id: ticketGuardado.id,
-      nombre: ticketGuardado.nombre,
-      dni: ticketGuardado.dni,
-    });
-    const codigoQR = await this.qrService.generarQR(qrData);
-
-    const ticketActualizado = await this.ticketRepository.actualizar(
-      ticketGuardado.id!,
-      { codigoQR }
-    );
-
-    return ticketActualizado;
+  async listarPorUser(userId: string): Promise<Ticket[]> {
+    return this.ticketRepository.listarPorUser(userId);
   }
 
-  async consumirTicket(data: ConsumirTicketDTO): Promise<TicketConsumidoResponse> {
-    const ticket = await this.ticketRepository.obtenerPorDni(data.dni);
+  async obtenerPorCode(code: string): Promise<Ticket> {
+    const ticket = await this.ticketRepository.obtenerPorCode(code);
     if (!ticket) {
-      throw new CustomError('Ticket no encontrado para ese DNI', 404);
-    }
-
-    if (ticket.consumido) {
-      return {
-        ticket,
-        consumido: true,
-        fechaConsumo: ticket.fechaConsumo,
-        yaConsumido: true,
-      };
-    }
-
-    const ticketActualizado = await this.ticketRepository.actualizar(ticket.id!, {
-      consumido: true,
-      fechaConsumo: new Date(),
-    });
-
-    return {
-      ticket: ticketActualizado,
-      consumido: true,
-      fechaConsumo: ticketActualizado.fechaConsumo,
-      yaConsumido: false,
-    };
-  }
-
-  async obtenerTicketPorId(id: string): Promise<Ticket> {
-    const ticket = await this.ticketRepository.obtenerPorId(id);
-    if (!ticket) {
-      throw new CustomError('Ticket no encontrado', 404);
+      throw new CustomError('Entrada no encontrada', 404);
     }
     return ticket;
   }
 
-  async obtenerTicketPorDni(dni: string): Promise<Ticket> {
-    const ticket = await this.ticketRepository.obtenerPorDni(dni);
+  async obtenerPdfData(code: string): Promise<TicketPdfData> {
+    const ticket = await this.ticketRepository.obtenerPorCode(code);
     if (!ticket) {
-      throw new CustomError('Ticket no encontrado para ese DNI', 404);
+      throw new CustomError('Entrada no encontrada', 404);
     }
-    return ticket;
-  }
 
-  async listarTodos(): Promise<Ticket[]> {
-    return this.ticketRepository.listar();
-  }
+    const event = await this.eventRepository.obtenerPorId(ticket.eventId);
+    if (!event) {
+      throw new CustomError('Evento no encontrado', 404);
+    }
 
-  async obtenerEstadisticas(): Promise<Estadisticas> {
-    const tickets = await this.ticketRepository.listar();
-    const porFacultad = await this.ticketRepository.contarPorFacultad();
-    const porDia = await this.ticketRepository.contarPorDia();
-    const consumidos = await this.ticketRepository.contarConsumidos();
+    const ticketType = await this.ticketTypeRepository.obtenerPorId(ticket.ticketTypeId);
+    const company = await this.companyRepository.obtenerPorId(ticket.companyId);
 
     return {
-      total: tickets.length,
-      consumidos,
-      pendientes: tickets.length - consumidos,
-      porFacultad,
-      porDia,
+      ticket,
+      eventName: event.name,
+      eventDate: event.date,
+      eventTime: event.time,
+      eventVenue: event.venue,
+      eventAddress: event.address,
+      ticketTypeName: ticketType?.name || 'General',
+      companyName: company?.name || 'Empresa',
     };
+  }
+
+  async checkIn(code: string, staffId: string, companyId: string): Promise<Ticket> {
+    const ticket = await this.ticketRepository.obtenerPorCode(code);
+    if (!ticket) {
+      throw new CustomError('Entrada no encontrada', 404);
+    }
+
+    if (ticket.companyId !== companyId) {
+      throw new CustomError('Esta entrada no pertenece a su empresa', 403);
+    }
+
+    if (ticket.status === 'used') {
+      throw new CustomError('Esta entrada ya fue utilizada', 400);
+    }
+
+    if (ticket.status === 'cancelled') {
+      throw new CustomError('Esta entrada ha sido cancelada', 400);
+    }
+
+    return this.ticketRepository.checkIn(code, staffId);
   }
 }

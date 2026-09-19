@@ -1,104 +1,39 @@
 import { Request, Response } from 'express';
 import { TicketUseCase } from '../../../ports/input/TicketUseCase';
-import { TicketSchema, ConsumirTicketSchema } from '../../../shared/utils/validator';
-import { CustomError } from '../../../shared/errors/CustomError';
+import { PdfPort } from '../../../ports/output/PdfPort';
+import { sendSuccess, asyncHandler } from './helpers';
 
 export class TicketController {
-  constructor(private readonly ticketUseCase: TicketUseCase) {}
+  constructor(
+    private readonly ticketUseCase: TicketUseCase,
+    private readonly pdfService: PdfPort
+  ) {}
 
-  crear = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const validatedData = TicketSchema.parse(req.body);
-      const ticket = await this.ticketUseCase.crearTicket(validatedData);
-      res.status(201).json({
-        success: true,
-        data: ticket,
-        message: 'Ticket creado exitosamente',
-      });
-    } catch (error) {
-      if (error instanceof CustomError) {
-        res.status(error.statusCode).json({ success: false, message: error.message });
-      } else if (error instanceof Error) {
-        res.status(400).json({ success: false, message: error.message });
-      } else {
-        res.status(500).json({ success: false, message: 'Error interno del servidor' });
-      }
-    }
-  };
+  listarPorUser = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tickets = await this.ticketUseCase.listarPorUser(req.user!.id);
+    sendSuccess(res, tickets);
+  });
 
-  consumir = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const validatedData = ConsumirTicketSchema.parse(req.body);
-      const result = await this.ticketUseCase.consumirTicket(validatedData);
+  obtenerPorCode = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const ticket = await this.ticketUseCase.obtenerPorCode(req.params.code);
+    sendSuccess(res, ticket);
+  });
 
-      if (result.yaConsumido) {
-        res.status(409).json({
-          success: false,
-          data: result,
-          message: `Este ticket ya fue consumido el ${result.fechaConsumo}`,
-        });
-        return;
-      }
+  descargarPdf = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const pdfData = await this.ticketUseCase.obtenerPdfData(req.params.code);
+    const pdfBuffer = await this.pdfService.generarTicketPdf(pdfData);
 
-      res.json({
-        success: true,
-        data: result,
-        message: 'Ticket consumido exitosamente',
-      });
-    } catch (error) {
-      if (error instanceof CustomError) {
-        res.status(error.statusCode).json({ success: false, message: error.message });
-      } else if (error instanceof Error) {
-        res.status(400).json({ success: false, message: error.message });
-      } else {
-        res.status(500).json({ success: false, message: 'Error interno del servidor' });
-      }
-    }
-  };
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=entrada-${req.params.code.slice(0, 8)}.pdf`);
+    res.send(pdfBuffer);
+  });
 
-  obtenerPorId = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-      const ticket = await this.ticketUseCase.obtenerTicketPorId(id);
-      res.json({ success: true, data: ticket });
-    } catch (error) {
-      if (error instanceof CustomError) {
-        res.status(error.statusCode).json({ success: false, message: error.message });
-      } else {
-        res.status(500).json({ success: false, message: 'Error interno del servidor' });
-      }
-    }
-  };
-
-  obtenerPorDni = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { dni } = req.params;
-      const ticket = await this.ticketUseCase.obtenerTicketPorDni(dni);
-      res.json({ success: true, data: ticket });
-    } catch (error) {
-      if (error instanceof CustomError) {
-        res.status(error.statusCode).json({ success: false, message: error.message });
-      } else {
-        res.status(500).json({ success: false, message: 'Error interno del servidor' });
-      }
-    }
-  };
-
-  listar = async (_req: Request, res: Response): Promise<void> => {
-    try {
-      const tickets = await this.ticketUseCase.listarTodos();
-      res.json({ success: true, data: tickets, total: tickets.length });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Error interno del servidor' });
-    }
-  };
-
-  estadisticas = async (_req: Request, res: Response): Promise<void> => {
-    try {
-      const stats = await this.ticketUseCase.obtenerEstadisticas();
-      res.json({ success: true, data: stats });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Error interno del servidor' });
-    }
-  };
+  checkIn = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const ticket = await this.ticketUseCase.checkIn(
+      req.body.code,
+      req.user!.id,
+      req.user!.companyId!
+    );
+    sendSuccess(res, ticket, 'Check-in realizado exitosamente');
+  });
 }

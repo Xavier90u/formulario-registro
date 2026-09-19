@@ -1,10 +1,9 @@
-import { CrearTicketDTO, ConsumirTicketDTO, Ticket, TicketConsumidoResponse, Estadisticas } from '../../domain/entities/Ticket';
+import { Ticket } from '../../domain/entities/Ticket';
+import { TicketPdfData } from '../output/PdfPort';
 
 export interface TicketUseCase {
-  crearTicket(data: CrearTicketDTO): Promise<Ticket>;
-  consumirTicket(data: ConsumirTicketDTO): Promise<TicketConsumidoResponse>;
-  obtenerTicketPorId(id: string): Promise<Ticket>;
-  obtenerTicketPorDni(dni: string): Promise<Ticket>;
-  listarTodos(): Promise<Ticket[]>;
-  obtenerEstadisticas(): Promise<Estadisticas>;
+  listarPorUser(userId: string): Promise<Ticket[]>;
+  obtenerPorCode(code: string): Promise<Ticket>;
+  obtenerPdfData(code: string): Promise<TicketPdfData>;
+  checkIn(code: string, staffId: string, companyId: string): Promise<Ticket>;
 }
